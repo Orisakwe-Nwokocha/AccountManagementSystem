@@ -5,7 +5,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from .models import Account
+from .models import Account, Transaction
 from .serializers import AccountSerializer, AccountCreateSerializer
 
 
@@ -35,32 +35,44 @@ def get_account(request, account_number):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_200_OK)
-    elif request.method == 'PATCH':
-        serializer = AccountCreateSerializer(account, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_200_OK)
     elif request.method == 'DELETE':
         account.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-    # try:
-    #     account = Account.objects.get(pk=account_number)
-    #     serializer = AccountSerializer(account)
-    #     return Response(serializer.data, status=status.HTTP_200_OK)
-    # except Account.DoesNotExist:
-    #     return Response({"success": "false", "message": "Account not found"}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["POST"])
 def deposit(request):
     account_number = request.data['account_number']
-    print(account_number)
-    amount = request.data['amount']
+    amount = Decimal(request.data['amount'])
     account = get_object_or_404(Account, pk=account_number)
-    print(account)
     if amount <= 0.0:
-        raise ValueError("Amount must be greater than 0")
-    account.balance += Decimal(amount)
+        return Response(data={"success": False, "message": "Amount must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
+    account.balance += amount
     account.save()
+    Transaction.objects.create(
+        account=account,
+        amount=amount
+    )
+    return Response(data={"success": True, "message": "Transaction successful"}, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+def withdraw(request):
+    account_number = request.data['account_number']
+    amount = Decimal(request.data['amount'])
+    pin = request.data['pin']
+    account = get_object_or_404(Account, pk=account_number)
+    if account.pin != pin:
+        return Response(data={"success": False, "message": "Invalid pin"}, status=status.HTTP_400_BAD_REQUEST)
+    if amount <= 0:
+        return Response(data={"success": False, "message": "Invalid amount"}, status=status.HTTP_400_BAD_REQUEST)
+    if account.balance < amount:
+        return Response(data={"success": False, "message": "Insufficient funds"}, status=status.HTTP_400_BAD_REQUEST)
+    account.balance -= amount
+    account.save()
+    Transaction.objects.create(
+        account=account,
+        amount=amount,
+        transaction_type='DEB'
+    )
     return Response(data={"success": True, "message": "Transaction successful"}, status=status.HTTP_200_OK)

@@ -35,10 +35,10 @@ class Transaction(models.Model):
         ('S', 'SUCCESSFUL'),
         ('F', 'FAILED'),
     ]
-    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='transactions')
     transaction_type = models.CharField(max_length=8, choices=TRANSACTION_TYPE, default='CRE')
-    transaction_date_time = models.DateTimeField(auto_now_add=True)
+    transaction_time = models.DateTimeField(auto_now_add=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    description = models.TextField()
+    description = models.TextField(blank=True, null=True)
     transaction_status = models.CharField(max_length=1, choices=TRANSACTION_STATUS, default='S')
 
