@@ -1,6 +1,8 @@
 import datetime
 from decimal import Decimal
 
+from django.core.mail import send_mail
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view
@@ -11,7 +13,8 @@ from rest_framework.viewsets import ModelViewSet
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Account, Transaction
-from .serializers import AccountCreateSerializer, DepositSerializer, WithdrawSerializer
+from .serializers import AccountCreateSerializer, DepositSerializer, WithdrawSerializer, TransactionSerializer, \
+    TransferSerializer
 
 
 # Create your views here.
@@ -79,8 +82,8 @@ class Deposit(APIView):
         account_number = serializer.data['account_number']
         amount = Decimal(serializer.data['amount'])
         account = get_object_or_404(Account, pk=account_number)
-        response = build_response(True, account_number, amount,
-                                  'CREDIT', 'Transaction successful')
+        response = build_transaction_response(True, account_number, amount,
+                                              'CREDIT', 'Transaction successful')
         if amount <= 0.0:
             response['success'] = False
             response['message'] = "Amount must be greater than 0"
@@ -107,8 +110,8 @@ class Withdraw(APIView):
         amount = Decimal(serializer.data['amount'])
         pin = serializer.data['pin']
         account = get_object_or_404(Account, pk=account_number)
-        response = build_response(True, account_number, amount,
-                                  'DEBIT', 'Transaction successful')
+        response = build_transaction_response(True, account_number, amount,
+                                              'DEBIT', 'Transaction successful')
         if account.pin != pin:
             response['success'] = False
             response['message'] = "Invalid pin"
@@ -132,7 +135,80 @@ class Withdraw(APIView):
         return Response(data=response, status=status.HTTP_200_OK)
 
 
-def build_response(success: bool, account_number, amount, transaction_type: str, message: str):
+class Transfer(APIView):
+    @staticmethod
+    @transaction.atomic()
+    def post(request):
+        serializer = TransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        sender_account_number = serializer.data['sender_account_number']
+        recipient_account_number = serializer.data['recipient_account_number']
+        amount = Decimal(serializer.data['amount'])
+        pin = serializer.data['pin']
+        sender = get_object_or_404(Account, pk=sender_account_number)
+        recipient = get_object_or_404(Account, pk=recipient_account_number)
+        response = build_transaction_response(True, sender_account_number, amount,
+                                              'TRANSFER', 'Transaction successful')
+        if sender_account_number == recipient_account_number:
+            response['success'] = False
+            response['message'] = "Sender and recipient account numbers must not match"
+            return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
+        if amount <= 0:
+            response['success'] = False
+            response['message'] = "Amount must be greater than 0"
+            return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
+        if sender.pin != pin:
+            response['success'] = False
+            response['message'] = "Invalid pin"
+            return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
+        if sender.balance < amount:
+            response['success'] = False
+            response['message'] = "Insufficient funds"
+            return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
+        sender_balance = sender.balance
+        recipient_balance = recipient.balance
+        sender_balance -= amount
+        recipient_balance += amount
+        Account.objects.filter(account_number=sender_account_number).update(balance=sender_balance)
+        Account.objects.filter(account_number=recipient_account_number).update(balance=recipient_balance)
+        Transaction.objects.create(
+            account=sender,
+            amount=amount,
+            transaction_type='TRAN_OUT'
+        )
+        Transaction.objects.create(
+            account=recipient,
+            amount=amount,
+            transaction_type='TRAN_IN'
+        )
+        return Response(data=response, status=status.HTTP_200_OK)
+
+
+class CheckBalance(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def get(request):
+        user = request.user
+        print(user)
+        account = get_object_or_404(Account, user=user.id)
+        response = {
+            "request_time": datetime.datetime.now(),
+            "success": True,
+            "account_number": account.account_number,
+            "balance": account.balance
+        }
+        message = f'''
+        Your new balance is ₦{account.balance}
+        Thank you for banking with us!!!
+        '''
+        send_mail('Mavericks Bank', message, 'noreply@maverickbank.com',
+                  [user.email])
+
+        return Response(data=response, status=status.HTTP_200_OK)
+
+
+def build_transaction_response(success: bool, account_number, amount, transaction_type: str, message: str):
     response = {'request_time': datetime.datetime.now(),
                 'success': success,
                 'account_number': account_number,
