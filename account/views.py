@@ -124,9 +124,8 @@ class Withdraw(APIView):
             response['success'] = False
             response['message'] = "Insufficient funds"
             return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
-        balance = account.balance
-        balance -= amount
-        Account.objects.filter(account_number=account_number).update(balance=balance)
+
+        Account.objects.filter(account_number=account_number).update(balance=(account.balance - amount))
         Transaction.objects.create(
             account=account,
             amount=amount,
@@ -137,21 +136,20 @@ class Withdraw(APIView):
 
 class Transfer(APIView):
     @staticmethod
-    @transaction.atomic()
+    @transaction.atomic
     def post(request):
         serializer = TransferSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         sender_account_number = serializer.data['sender_account_number']
-        recipient_account_number = serializer.data['recipient_account_number']
         amount = Decimal(serializer.data['amount'])
         pin = serializer.data['pin']
         sender = get_object_or_404(Account, pk=sender_account_number)
-        recipient = get_object_or_404(Account, pk=recipient_account_number)
         response = build_transaction_response(True, sender_account_number, amount,
                                               'TRANSFER', 'Transaction successful')
-        if sender_account_number == recipient_account_number:
+
+        if sender.balance < amount:
             response['success'] = False
-            response['message'] = "Sender and recipient account numbers must not match"
+            response['message'] = "Insufficient funds"
             return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
         if amount <= 0:
             response['success'] = False
@@ -161,16 +159,12 @@ class Transfer(APIView):
             response['success'] = False
             response['message'] = "Invalid pin"
             return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
-        if sender.balance < amount:
-            response['success'] = False
-            response['message'] = "Insufficient funds"
-            return Response(data=response, status=status.HTTP_400_BAD_REQUEST)
-        sender_balance = sender.balance
-        recipient_balance = recipient.balance
-        sender_balance -= amount
-        recipient_balance += amount
-        Account.objects.filter(account_number=sender_account_number).update(balance=sender_balance)
-        Account.objects.filter(account_number=recipient_account_number).update(balance=recipient_balance)
+
+        Account.objects.filter(account_number=sender_account_number).update(balance=(sender.balance - amount))
+        recipient_account_number = serializer.data['recipient_account_number']
+        recipient = get_object_or_404(Account, pk=recipient_account_number)
+        Account.objects.filter(account_number=recipient_account_number).update(balance=(recipient.balance + amount))
+
         Transaction.objects.create(
             account=sender,
             amount=amount,
@@ -181,6 +175,7 @@ class Transfer(APIView):
             amount=amount,
             transaction_type='TRAN_IN'
         )
+
         return Response(data=response, status=status.HTTP_200_OK)
 
 
@@ -198,8 +193,11 @@ class CheckBalance(APIView):
             "account_number": account.account_number,
             "balance": account.balance
         }
-        message = f'''
+        message = f'''k
+        Hi {user.username},
+        
         Your new balance is ₦{account.balance}
+        
         Thank you for banking with us!!!
         '''
         send_mail('Mavericks Bank', message, 'noreply@maverickbank.com',
