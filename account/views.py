@@ -93,7 +93,7 @@ class Deposit(APIView):
         Account.objects.filter(account_number=account_number).update(balance=balance)
         Transaction.objects.create(
             account=account,
-            amount=amount
+            amount='+' + str(amount)
         )
 
         return Response(data=response, status=status.HTTP_200_OK)
@@ -128,7 +128,7 @@ class Withdraw(APIView):
         Account.objects.filter(account_number=account_number).update(balance=(account.balance - amount))
         Transaction.objects.create(
             account=account,
-            amount=amount,
+            amount='-' + str(amount),
             transaction_type='DEB'
         )
         return Response(data=response, status=status.HTTP_200_OK)
@@ -167,12 +167,12 @@ class Transfer(APIView):
 
         Transaction.objects.create(
             account=sender,
-            amount=amount,
+            amount='-' + str(amount),
             transaction_type='TRAN_OUT'
         )
         Transaction.objects.create(
             account=recipient,
-            amount=amount,
+            amount='+' + str(amount),
             transaction_type='TRAN_IN'
         )
 
@@ -193,7 +193,7 @@ class CheckBalance(APIView):
             "account_number": account.account_number,
             "balance": account.balance
         }
-        message = f'''k
+        message = f'''
         Hi {user.username},
         
         Your new balance is ₦{account.balance}
